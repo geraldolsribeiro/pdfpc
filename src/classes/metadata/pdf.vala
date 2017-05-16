@@ -11,6 +11,7 @@
  * Copyright 2013 Stefan Tauner
  * Copyright 2015 Maurizio Tomasi
  * Copyright 2015 endzone
+ * Copyright 2017 Olivier Pantalé
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -31,8 +32,19 @@ namespace pdfpc.Metadata {
     /**
      * Metadata for Pdf files
      */
-    public class Pdf: Base
-    {
+    public class Pdf: Object {
+        /**
+         * Unique Resource Locator for the given slideset
+         */
+        protected string url;
+
+        /**
+         * Return the registered url
+         */
+        public string get_url() {
+            return this.url;
+        }
+
         public string? pdf_fname = null;
         protected string? pdfpc_fname = null;
 
@@ -79,6 +91,11 @@ namespace pdfpc.Metadata {
         private int end_user_slide = -1;
 
         /**
+         * The "last displayed" defined by the user
+         */
+        private int last_saved_slide = -1;
+
+        /**
          * Were the skips modified by the user?
          */
         protected bool skips_by_user;
@@ -114,8 +131,54 @@ namespace pdfpc.Metadata {
                     string section_content =  config_sections[i + 1].strip();
 
                     switch (section_type) {
+                        case "[duration]": {
+                            // if duration was set via command line
+                            // ignore pdfpc file
+                            if (Options.duration == uint.MAX) {
+                                this.duration = int.parse(section_content);
+                            }
+                            break;
+                        }
+                        case "[end_time]": {
+                            // command line first
+                            if (Options.end_time == null) {
+                                Options.end_time = section_content;
+                            }
+                            break;
+                        }
+                        case "[end_user_slide]": {
+                            this.end_user_slide = int.parse(section_content);
+                            break;
+                        }
                         case "[file]": {
                             this.pdf_fname = section_content;
+                            break;
+                        }
+                        case "[font_size]": {
+                            this.font_size = int.parse(section_content);
+                            break;
+                        }
+                        case "[last_saved_slide]": {
+                            this.last_saved_slide = int.parse(section_content);
+                            break;
+                        }
+                        case "[last_minutes]": {
+                            // command line first
+                            // 5 is the default value
+                            if (Options.last_minutes == 5) {
+                                Options.last_minutes = int.parse(section_content);
+                            }
+                            break;
+                        }
+                        case "[notes]": {
+                            notes.parse_lines(section_content.split("\n"));
+                            break;
+                        }
+                        case "[notes_position]": {
+                            // command line first
+                            if (Options.notes_position == null) {
+                                this.notes_position = NotesPosition.from_string(section_content);
+                            }
                             break;
                         }
                         case "[skip]": {
@@ -123,20 +186,11 @@ namespace pdfpc.Metadata {
                             skips_by_user = true;
                             break;
                         }
-                        case "[duration]": {
-                            this.duration = int.parse(section_content);
-                            break;
-                        }
-                        case "[end_user_slide]": {
-                            this.end_user_slide = int.parse(section_content);
-                            break;
-                        }
-                        case "[notes]": {
-                            notes.parse_lines(section_content.split("\n"));
-                            break;
-                        }
-                        case "[font_size]": {
-                            this.font_size = int.parse(section_content);
+                        case "[start_time]": {
+                            // command line first
+                            if (Options.start_time == null) {
+                                Options.start_time = section_content;
+                            }
                             break;
                         }
                         default: {
@@ -146,7 +200,8 @@ namespace pdfpc.Metadata {
                     }
                 }
             } catch (Error e) {
-                error("%s", e.message);
+                GLib.printerr("%s\n", e.message);
+                Process.exit(1);
             }
         }
 
@@ -196,8 +251,9 @@ namespace pdfpc.Metadata {
          */
         public void quit() {
             this.save_to_disk();
-            foreach (var mapping in this.action_mapping)
+            foreach (var mapping in this.action_mapping) {
                 mapping.deactivate();
+            }
         }
 
         /**
@@ -205,9 +261,10 @@ namespace pdfpc.Metadata {
          * with the notes or the skips)
          */
         public void save_to_disk() {
-            string contents =   format_duration()
+            string contents =   format_command_line_options()
                               + format_skips()
                               + format_end_user_slide()
+			      + format_last_saved_slide()
                               + format_font_size()
                               + format_notes();
             try {
@@ -216,7 +273,8 @@ namespace pdfpc.Metadata {
                     GLib.FileUtils.set_contents(this.pdfpc_fname, contents);
                 }
             } catch (Error e) {
-                error("%s", e.message);
+                GLib.printerr("Failed to store metadata on disk: %s\nThe metadata was:\n\n%s", e.message, contents);
+                Process.exit(1);
             }
         }
 
@@ -250,6 +308,15 @@ namespace pdfpc.Metadata {
             return contents;
         }
 
+        protected string format_last_saved_slide() {
+            string contents = "";
+            if (this.last_saved_slide >= 0) {
+                contents += "[last_saved_slide]\n%d\n".printf(this.last_saved_slide);
+            }
+
+            return contents;
+        }
+
         protected string format_font_size() {
             string contents = "";
             if (this.font_size >= 0) {
@@ -271,10 +338,22 @@ namespace pdfpc.Metadata {
             return contents;
         }
 
-        protected string format_duration() {
+        protected string format_command_line_options() {
             string contents = "";
-            if (this.duration > 0) {
+            if (this.duration != uint.MAX) {
                 contents += "[duration]\n%u\n".printf(duration);
+            }
+            if (Options.end_time != null) {
+                contents += "[end_time]\n%s\n".printf(Options.end_time);
+            }
+            if (this.notes_position != NotesPosition.NONE) {
+                contents += "[notes_position]\n%s\n".printf(this.notes_position.to_string());
+            }
+            if (Options.last_minutes != 5) {
+                contents += "[last_minutes]\n%u\n".printf(Options.last_minutes);
+            }
+            if (Options.start_time != null) {
+                contents += "[start_time]\n%s\n".printf(Options.start_time);
             }
 
             return contents;
@@ -301,10 +380,14 @@ namespace pdfpc.Metadata {
         /**
          * Base constructor taking the file url to the pdf file
          */
-        public Pdf(string fname, NotesPosition notes_position) {
-            base(fname);
+        public Pdf(string fname) {
+            this.url = File.new_for_commandline_arg(fname).get_uri();
 
-            this.notes_position = notes_position;
+            this.action_mapping = new Gee.ArrayList<ActionMapping>();
+
+            this.notes_position = NotesPosition.from_string(Options.notes_position);
+
+            this.duration = Options.duration;
 
             fill_path_info(fname);
             notes = new slides_notes();
@@ -353,7 +436,7 @@ namespace pdfpc.Metadata {
         /**
          * Return the number of pages in the pdf document
          */
-        public override uint get_slide_count() {
+        public uint get_slide_count() {
             return this.page_count;
         }
 
@@ -383,6 +466,21 @@ namespace pdfpc.Metadata {
         }
 
         /**
+         * Return the last displayed slide defined by the user. It may be different as
+         * get_user_slide_count()!
+         */
+        public int get_last_saved_slide() {
+            return this.last_saved_slide;
+        }
+
+        /**
+         * Set the last slide defined by the user
+         */
+        public void set_last_saved_slide(int slide) {
+            this.last_saved_slide = slide;
+        }
+
+         /**
          * Toggle the skip flag for one slide
          *
          * We require to be provided also with the user_slide_number, as this
@@ -432,9 +530,14 @@ namespace pdfpc.Metadata {
 
         /**
          * Transform from user slide numbers to real slide numbers
+         *
+         * If lastSlide is true, the last page of an overlay will be return,
+         * otherwise, the first one
          */
-        public int user_slide_to_real_slide(int number) {
-            if (number < user_view_indexes.length) {
+        public int user_slide_to_real_slide(int number, bool lastSlide = true) {
+            if (lastSlide && number + 1 < user_view_indexes.length) {
+                return this.user_view_indexes[number+1] - 1;
+            } else if (number < user_view_indexes.length) {
                 return this.user_view_indexes[number];
             } else {
                 return (int)this.page_count;
@@ -445,7 +548,7 @@ namespace pdfpc.Metadata {
             // Here we could do a binary search
             int user_slide = 0;
             for (int u = 0; u < this.get_user_slide_count(); ++u) {
-                int real_slide = this.user_slide_to_real_slide(u);
+                int real_slide = this.user_view_indexes[u];
                 if (number == real_slide) {
                     user_slide = u;
                     break;
@@ -584,7 +687,7 @@ namespace pdfpc.Metadata {
             } catch(GLib.Error e) {
                 GLib.printerr("Unable to open pdf file \"%s\": %s\n",
                               fname, e.message);
-                Posix.exit(1);
+                Process.exit(1);
             }
 
             return document;
@@ -595,7 +698,7 @@ namespace pdfpc.Metadata {
          * page.
          */
         private int mapping_page_num = -1;
-        private GLib.List<ActionMapping> action_mapping;
+        private Gee.List<ActionMapping> action_mapping;
         private ActionMapping[] blanks = {
 #if MOVIES
             new ControlledMovie(),
@@ -610,12 +713,12 @@ namespace pdfpc.Metadata {
          * destroy the existing action mappings and create new mappings for
          * the new page.
          */
-        public unowned GLib.List<ActionMapping> get_action_mapping(int page_num) {
+        public unowned Gee.List<ActionMapping> get_action_mapping(int page_num) {
             if (page_num != this.mapping_page_num) {
                 foreach (var mapping in this.action_mapping) {
                     mapping.deactivate();
                 }
-                this.action_mapping = null; //.Is this really the correct way to clear a list?
+                this.action_mapping.clear();
 
                 GLib.List<Poppler.LinkMapping> link_mappings;
                 link_mappings = this.get_document().get_page(page_num).get_link_mapping();
@@ -623,7 +726,7 @@ namespace pdfpc.Metadata {
                     foreach (var blank in blanks) {
                         var action = blank.new_from_link_mapping(mapping, this.controller, this.document);
                         if (action != null) {
-                            this.action_mapping.append(action);
+                            this.action_mapping.add(action);
                             break;
                         }
                     }
@@ -637,7 +740,7 @@ namespace pdfpc.Metadata {
                     foreach (var blank in blanks) {
                         var action = blank.new_from_annot_mapping(mapping, this.controller, this.document);
                         if (action != null) {
-                            this.action_mapping.append(action);
+                            this.action_mapping.add(action);
                             break;
                         }
                     }
@@ -686,6 +789,23 @@ namespace pdfpc.Metadata {
                     return BOTTOM;
                 default:
                     return NONE;
+            }
+        }
+
+        public string to_string() {
+            switch (this) {
+                case NONE:
+                    return "NONE";
+                case TOP:
+                    return "TOP";
+                case BOTTOM:
+                    return "BOTTOM";
+                case RIGHT:
+                    return "RIGHT";
+                case LEFT:
+                    return "LEFT";
+                default:
+                    assert_not_reached();
             }
         }
     }

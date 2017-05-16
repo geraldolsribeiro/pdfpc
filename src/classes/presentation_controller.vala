@@ -11,6 +11,7 @@
  * Copyright 2012 Thomas Tschager
  * Copyright 2015 Andreas Bilke
  * Copyright 2015 Andy Barry
+ * Copyright 2017 Olivier Pantalé
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -172,7 +173,7 @@ namespace pdfpc {
         /**
          * Controllables which are registered with this presentation controller.
          */
-        protected GLib.List<Controllable> controllables;
+        protected Gee.List<Controllable> controllables;
 
         /**
          * The metadata of the presentation
@@ -193,9 +194,8 @@ namespace pdfpc {
 
         /**
          * Stores the "history" of the slides (jumps only)
-         * A stack would be more useful.
          */
-        private int[] history;
+        private Gee.ArrayQueue<int> history;
 
         /**
          * Timer for the presentation. It should only be displayed on one view.
@@ -247,7 +247,9 @@ namespace pdfpc {
             this.metadata.controller = this;
             this.black_on_end = allow_black_on_end;
 
-            this.controllables = new GLib.List<Controllable>();
+            this.controllables = new Gee.ArrayList<Controllable>();
+
+            this.history = new Gee.ArrayQueue<int>();
 
             // Calculate the countdown to display until the presentation has to
             // start
@@ -278,7 +280,7 @@ namespace pdfpc {
                     "/org/freedesktop/ScreenSaver");
                 this.screensaver_cookie = this.screensaver.inhibit("pdfpc",
                     "Showing a presentation");
-                stdout.printf("Screensaver inhibited\n");
+                GLib.print("Screensaver inhibited\n");
             } catch (Error error) {
                 // pass
             }
@@ -309,9 +311,6 @@ namespace pdfpc {
             presentation_allocation = a;
             presentation_surface = new Gtk.DrawingArea();
             presentation_surface.set_size_request(a.width, a.height);
-            var transparent = Gdk.RGBA ();
-            transparent.alpha=0;
-            this.presentation_surface.override_background_color(Gtk.StateFlags.NORMAL, transparent);
             this.presentation_surface.draw.connect ((context) => {
                     draw_pointer(context, presentation_allocation);
                     return true;
@@ -323,9 +322,6 @@ namespace pdfpc {
             presenter_allocation = a;
             presenter_surface = new Gtk.DrawingArea();
             presenter_surface.set_size_request(a.width, a.height);
-            var transparent = Gdk.RGBA ();
-            transparent.alpha=0;
-            this.presenter_surface.override_background_color(Gtk.StateFlags.NORMAL, transparent);
             this.presenter_surface.draw.connect ((context) => {
                     draw_pointer(context, presenter_allocation);
                     return true;
@@ -448,7 +444,7 @@ namespace pdfpc {
             if (this.screensaver != null && this.screensaver_cookie != 0) {
                 try {
                     this.screensaver.un_inhibit(this.screensaver_cookie);
-                    stdout.printf("Screensaver reactivated\n");
+                    GLib.print("Screensaver reactivated\n");
                 } catch (Error error) {
                     // pass
                 }
@@ -495,6 +491,8 @@ namespace pdfpc {
             add_action("overlay", this.toggle_skip);
             add_action("note", this.controllables_edit_note);
             add_action("endSlide", this.set_end_user_slide);
+            add_action("lastSlide", this.set_last_saved_slide);
+            add_action("jumpLastSlide", this.goto_last_saved_slide);
 
             add_action("increaseFontSize", this.increase_font_size);
             add_action("decreaseFontSize", this.decrease_font_size);
@@ -538,6 +536,8 @@ namespace pdfpc {
                 "overlay", "Mark current slide as overlay slide",
                 "note", "Edit note for current slide",
                 "endSlide", "Set current slide as end slide",
+                "lastSlide", "Set last displayed slide",
+                "jumpLastSlide", "Goto last displayed slide",
                 "increaseFontSize", "Increase the current font size by 10%",
                 "decreaseFontSize", "Decrease the current font size by 10%",
                 "togglePointer", "Toggle pointer mode",
@@ -560,10 +560,11 @@ namespace pdfpc {
          */
         public void bind(uint keycode, uint modMask, string action_name) {
             Action? action = this.action_group.lookup_action(action_name);
-            if (action != null)
+            if (action != null) {
                 this.keyBindings.set(new KeyDef(keycode, modMask), action);
-            else
-                warning("Unknown action %s", action_name);
+            } else {
+                GLib.printerr("Unknown action %s\n", action_name);
+            }
         }
 
         /**
@@ -585,10 +586,11 @@ namespace pdfpc {
          */
         public void bindMouse(uint button, uint modMask, string action_name) {
             Action? action = this.action_group.lookup_action(action_name);
-            if (action != null)
+            if (action != null) {
                 this.mouseBindings.set(new KeyDef(button, modMask), action);
-            else
-                warning("Unknown action %s", action_name);
+            } else {
+                GLib.printerr("Unknown action %s\n", action_name);
+            }
         }
 
         /**
@@ -718,23 +720,45 @@ namespace pdfpc {
         }
 
         /**
+         * Set the last slide as defined by the user
+         */
+        public void set_last_saved_slide() {
+            this.metadata.set_last_saved_slide(this.current_user_slide_number + 1);
+            this.controllables_update();
+	    presenter.session_saved();
+        }
+
+        /**
+         * Set the last slide as defined by the user
+         */
+        public void set_last_saved_slide_overview() {
+            int user_selected = this.overview.current_slide;
+            this.metadata.set_last_saved_slide(user_selected + 1);
+        }
+
+        /**
          * Register the current slide in the history
          */
         void push_history() {
-            this.history += this.current_slide_number;
+            this.history.offer_head(this.current_slide_number);
         }
 
         /**
          * A request to change the page has been issued
          */
-        public void page_change_request(int page_number) {
-            if (page_number != this.current_slide_number)
+        public void page_change_request(int page_number, bool start_timer = true) {
+            if (page_number != this.current_slide_number) {
                 this.push_history();
+            }
+
             this.current_slide_number = page_number;
             this.current_user_slide_number = this.metadata.real_slide_to_user_slide(
                 this.current_slide_number);
-            this.timer.start();
             this.controllables_update();
+
+            if (start_timer) {
+                this.timer.start();
+            }
         }
 
         /**
@@ -783,13 +807,13 @@ namespace pdfpc {
          * registered false is returned.
          */
         public bool register_controllable(Controllable controllable) {
-            if (this.controllables.find(controllable) != null) {
+            if (this.controllables.contains(controllable)) {
                 // The controllable has already been added.
                 return false;
             }
 
             //controllable.set_controller( this );
-            this.controllables.append(controllable);
+            this.controllables.add(controllable);
             if (this.main_view == null)
                 this.main_view = controllable.main_view;
 
@@ -915,13 +939,20 @@ namespace pdfpc {
         }
 
         /**
-         * Go to the first slide
+         * Wrapper function to work with key bindings and callbacks
          */
         public void goto_first() {
+            _goto_first(false);
+        }
+
+        /**
+         * Go to the first slide
+         */
+        private void _goto_first(bool skipHistory) {
             this.timer.start();
 
             // update history if we are not already at the first slide
-            if (this.current_slide_number > 0) {
+            if (this.current_slide_number > 0 && !skipHistory) {
                 this.push_history();
             }
 
@@ -932,6 +963,29 @@ namespace pdfpc {
                 this.faded_to_black = false;
             }
             this.controllables_update();
+        }
+
+        /**
+         * Go to the last displayed slide
+         */
+        public void goto_last_saved_slide() {
+
+            if (this.metadata.get_last_saved_slide() == -1) {
+                return;
+            }
+
+            // Start the timer
+            this.timer.start();
+
+            this.current_user_slide_number = this.metadata.get_last_saved_slide() - 1;
+            this.current_slide_number = this.metadata.user_slide_to_real_slide(this.current_user_slide_number);
+
+            if (!this.frozen) {
+                this.faded_to_black = false;
+            }
+
+            this.controllables_update();
+            presenter.session_loaded();
         }
 
         /**
@@ -995,7 +1049,7 @@ namespace pdfpc {
         /**
          * Goto a slide in user page numbers. page_number is 1 indexed.
          */
-        public void goto_user_page(int page_number) {
+        public void goto_user_page(int page_number, bool useLast = true) {
             this.timer.start();
 
             if (this.current_user_slide_number != page_number - 1) {
@@ -1011,7 +1065,7 @@ namespace pdfpc {
                 destination = n_user_slides - 1;
             }
             this.current_user_slide_number = destination;
-            this.current_slide_number = this.metadata.user_slide_to_real_slide(this.current_user_slide_number);
+            this.current_slide_number = this.metadata.user_slide_to_real_slide(this.current_user_slide_number, useLast);
             if (!this.frozen) {
                 this.faded_to_black = false;
             }
@@ -1027,16 +1081,16 @@ namespace pdfpc {
                 return;
             }
 
-            int history_length = this.history.length;
-            if (history_length == 0) {
-                this.goto_first();
+            if (this.history.is_empty) {
+                // skip history pushing to prevent slide hopping
+                this._goto_first(true);
 
                 return;
             }
 
-            this.current_slide_number = this.history[history_length - 1];
+            int history_head = this.history.poll_head();
+            this.current_slide_number = history_head;
             this.current_user_slide_number = this.metadata.real_slide_to_user_slide(this.current_slide_number);
-            this.history.resize(history_length - 1);
 
             if (!this.frozen) {
                 this.faded_to_black = false;
@@ -1206,8 +1260,10 @@ namespace pdfpc {
          * controllable's main view.  Also, return the XID for the view's window,
          * useful for overlays.
          */
-        public uint* overlay_pos(int n, Poppler.Rectangle area, out Gdk.Rectangle rect) {
-            Controllable c = this.controllables.nth_data(n);
+        public uint* overlay_pos(int n, Poppler.Rectangle area, out Gdk.Rectangle rect, out int gdk_scale) {
+            Controllable c = (n < this.controllables.size) ? this.controllables.get(n) : null;
+            // default scale, and make the compiler happy
+            gdk_scale = 1;
             if (c == null) {
                 rect = Gdk.Rectangle();
                 return null;
@@ -1218,6 +1274,7 @@ namespace pdfpc {
                 return null;
             }
             rect = view.convert_poppler_rectangle_to_gdk_rectangle(area);
+            gdk_scale = view.scale_factor;
             return (uint*) ((Gdk.X11.Window) view.get_window()).get_xid();
         }
 #endif

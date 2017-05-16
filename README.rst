@@ -5,10 +5,10 @@ pdfpc
 About
 =====
 
-pdfpc is a GTK based presentation viewer application for GNU/Linux which uses
-Keynote like multi-monitor output to provide meta information to the speaker
-during the presentation. It is able to show a normal presentation window on one
-screen, while showing a more sophisticated overview on the other one providing
+pdfpc is a GTK based presentation viewer application which uses Keynote like
+multi-monitor output to provide meta information to the speaker during the
+presentation. It is able to show a normal presentation window on one screen,
+while showing a more sophisticated overview on the other one providing
 information like a picture of the next slide, as well as the left over time
 till the end of the presentation. The input files processed by pdfpc are PDF
 documents, which can be created using nearly any of today's presentation
@@ -28,7 +28,6 @@ Installation
         sudo dnf install pdfpc
 
 - `Compiling from source <#compile-and-install>`_
-- `Compiling from github <#compiling-from-github>`_
 
 Sample presentations
 --------------------
@@ -56,10 +55,11 @@ requirements need to be met:
 - gee 0.8
 - poppler with glib bindings
 - gstreamer 1.0
+- pangocairo
 
 On Ubuntu systems, you can install these dependencies with::
 
-    sudo apt-get install cmake libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgee-0.8-dev librsvg2-dev libpoppler-glib-dev libgtk2.0-dev libgtk-3-dev valac
+    sudo apt-get install cmake valac libgee-0.8-dev libpoppler-glib-dev libgtk-3-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 
 and you should consider installing all the available gstreamer codecs::
 
@@ -103,56 +103,11 @@ gstreamer dependencies as well as gdk-x11.  The requirement for these packages
 can be removed by compiling without support for movie playback by passing
 *-DMOVIES=OFF* to the cmake command.
 
-Compiling from github
----------------------
-
-If you want the bleeding-edge version of pdfpc, you should checkout the git
-repository. The *master* branch should be fairly stable and safe to use.
-
-The pdfpc source can be retrieved from github::
-
-    git clone git://github.com/pdfpc/pdfpc.git
-
-After it has been transfered you need to switch to the ``pdfpc`` directory,
-which has just been created.
-
-You are now set to compile and install pdfpc.  Start by creating a build
-directory (this is optional but it keeps the directories clean, in case you
-want to do some changes)::
-
-    mkdir build/
-    cd build/
-
-After you are inside the build directory create the needed Makefiles using
-CMake::
-
-    cmake ..
-
-If you have put your build directory elsewhere on your system adapt the path
-above accordingly. You need to provide CMake with the pdfpc directory as
-created by git. As pointed out before, you may alter the installation
-directories via the *-DCMAKE_INSTALL_PREFIX* and *-DSYSCONFDIR* command line
-arguments.
-
-If all requirements are met, CMake will tell you that it created all the
-necessary build files for you. If any of the requirements were not met you will
-be informed of it to provide the necessary files or install the appropriate
-packages.
-
-The next step is to compile and install pdfpc using GNU Make or any other make
-derivative you may have installed. Simply issue the following command to start
-building the application::
-
-    make
-    sudo make install
-
-Congratulations you just installed pdfpc on your system.
-
 Compiling on Windows
 --------------------
 
 On issue #106 there is a short tutorial on how to compile pdfpc on Windows.
-First a cygwin installation with the following depedencies is needed:
+First a cygwin installation with the following dependencies is needed:
 
 - cmake
 - automake
@@ -176,14 +131,14 @@ Compiling in Mac OS X (Yosemite)
 
 First, install homebrew as described on their webpage, then install the dependencies::
 
-    brew install cmake vala gtk+3 libgee poppler
+    brew install cmake vala gtk+3 libgee poppler librsvg libcroco
 
 You need to call cmake with::
 
     cmake -DMOVIES=off
 
 since Yosemite has no X11 implementation, and the movie playback uses X11
-features. Note that the icons don't load (see issue #179)
+features.
 
 Compiling Trouble Shooting
 --------------------------
@@ -204,14 +159,37 @@ Now download some [sample presentations](#sample-presentations) and load  them u
 
 FAQ
 ===
-* Embedded video playback is not working.
- * You likely have a ``gstreamer`` codec issue.  Try loading the video file you want to play with the following command: ``gst-launch-1.0 filesrc location=<your video> ! decodebin ! autovideosink``  If the video plays, go ahead and `submit an issue <https://github.com/pdfpc/pdfpc/issues>`_.  Otherwise, the command will likely output some good hints for why gstreamer cannot decode the video.
+
+Embedded video playback is not working.
+---------------------------------------
+
+You likely have a ``gstreamer`` codec issue.  First, try to install
+``gstreamer``'s 'bad' codecs (package ``libgstreamer-plugins-bad1.0-0`` on
+Debian/Ubuntu). By doing so, ``pdfpc`` will use ``gstreamer``'s OpenGL backend
+for rendering, which might solve your issue.
+
+If the problem persists, try loading the video file you want to play with the
+following command: ``gst-launch-1.0 filesrc location=<your video> ! decodebin !
+autovideosink``  If the video plays, go ahead and `submit an issue
+<https://github.com/pdfpc/pdfpc/issues>`_.  Otherwise, the command will likely
+output some good hints for why gstreamer cannot decode the video.
+
+
+Windows do not appear on the correct screen.
+---------------------------------------------------
+
+For tiling window managers, the movement and fullscreening of the windows do not work reliable.
+It is therefore important to tell your WM to force floating the pdfpc windows.
+
+If you are using i3-wm add this to your config file::
+
+    for_window [ title="^pdfpc - present" ] border none floating enable
 
 Acknowledgements
 ================
 
 pdfpc has been developed by Jakob Westhoff, David Vilar, Robert Schroll, Andreas
-Bilke, Andy Barry, and others.  It was previously available at
+Bilke, Andy Barry, Phillip Berndt and others. It was previously available at
 https://github.com/davvil/pdfpc
 
 pdfpc is a fork of Pdf Presenter Console by Jakob Westhoff, available at

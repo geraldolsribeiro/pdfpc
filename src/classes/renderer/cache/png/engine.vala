@@ -36,7 +36,7 @@ namespace pdfpc.Renderer.Cache {
         /**
          * Initialize the cache store
          */
-        public Engine( Metadata.Base metadata ) {
+        public Engine( Metadata.Pdf metadata ) {
             base( metadata );
             this.storage = new PNG.Item[this.metadata.get_slide_count()];
         }
@@ -45,6 +45,10 @@ namespace pdfpc.Renderer.Cache {
          * Store a surface in the cache using the given index as identifier
          */
         public override void store( uint index, Cairo.ImageSurface surface ) {
+            png_store(index, surface);
+        }
+
+        protected void png_store(uint index, Cairo.ImageSurface surface ) {
             Gdk.Pixbuf pixbuf = Gdk.pixbuf_get_from_surface(surface, 0, 0, surface.get_width(),
                 surface.get_height());
             uint8[] buffer;
@@ -53,7 +57,8 @@ namespace pdfpc.Renderer.Cache {
                 pixbuf.save_to_buffer( out buffer, "png", "compression", "1", null );
             }
             catch( Error e ) {
-                error( "Could not generate PNG cache image for slide %u: %s", index, e.message );
+                GLib.printerr("Could not generate PNG cache image for slide %u: %s\n", index, e.message);
+                Process.exit(1);
             }
 
             var item = new PNG.Item( buffer );
@@ -66,6 +71,10 @@ namespace pdfpc.Renderer.Cache {
          * If no item with the given index is available null is returned
          */
         public override Cairo.ImageSurface? retrieve( uint index ) {
+            return png_retrieve(index);
+        }
+
+        protected Cairo.ImageSurface? png_retrieve( uint index ) {
             var item = this.storage[index];
             if ( item == null ) {
                 return null;
@@ -77,7 +86,8 @@ namespace pdfpc.Renderer.Cache {
                 loader.close();
             }
             catch( Error e ) {
-                error( "Could not load cached PNG image for slide %u: %s", index, e.message );
+                GLib.printerr("Could not load cached PNG image for slide %u: %s\n", index, e.message);
+                Process.exit(1);
             }
 
             var pixbuf = loader.get_pixbuf();
